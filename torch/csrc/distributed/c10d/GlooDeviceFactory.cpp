@@ -1,8 +1,8 @@
-#include <c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 
 #ifdef USE_C10D_GLOO
 
-#include <stdlib.h>
+#include <cstdlib>
 
 #include <c10/util/Exception.h>
 
@@ -38,7 +38,7 @@ C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(
     GlooDeviceRegistry,
     ::gloo::transport::Device,
     const std::string& /* interface */,
-    const std::string& /* hostname */);
+    const std::string& /* hostname */)
 
 #if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
@@ -61,13 +61,13 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
 // Registry priority is per key identifier. We register TCP to `LINUX` for
 // the flexibility of other application to override by priority. Register
 // TCP to `TCP` for env "GLOO_DEVICE_TRANSPORT" override.
-C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice)
 #endif
 
 #if GLOO_HAVE_TRANSPORT_TCP_TLS
 static std::string cstr_to_std_string(const char* chars) {
-  return std::string (chars != nullptr ? chars : "");
+  return std::string(chars != nullptr ? chars : "");
 }
 
 static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
@@ -84,14 +84,19 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
-  const auto cert = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
-  const auto caFile = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
-  const auto caPath = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
-  return ::gloo::transport::tcp::tls::CreateDevice(attr, pkey, cert, caFile, caPath);
+  const auto pkey =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
+  const auto cert =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
+  const auto caFile =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
+  const auto caPath =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
+  return ::gloo::transport::tcp::tls::CreateDevice(
+      attr, pkey, cert, caFile, caPath);
 }
 
-C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice)
 #endif
 
 #if GLOO_HAVE_TRANSPORT_UV
@@ -115,15 +120,15 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
 // Registry priority is per key identifier. We register UV to `APPLE` for
 // the flexibility of other application to override by priority. Register
 // UV to `UV` for env "GLOO_DEVICE_TRANSPORT" override.
-C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice)
 #endif
 
 namespace {
-std::shared_ptr<::gloo::transport::Device>
-makeGlooDevice(const std::string& interfaceName, const std::string& hostName)
-{
+std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
+    const std::string& interfaceName,
+    const std::string& hostName) {
   static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
   if (transportName) {
     return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);

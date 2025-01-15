@@ -5,6 +5,9 @@ expressive and robust components (e.g. better runner and result display
 components) in future iterations. However this allows us to excercise the
 underlying benchmark generation infrastructure in the mean time.
 """
+
+# mypy: ignore-errors
+
 import argparse
 import sys
 from typing import List
@@ -24,7 +27,12 @@ def main(argv: List[str]) -> None:
 
     results = Runner(work_orders).run()
     for work_order in work_orders:
-        print(work_order.label, work_order.autolabels, work_order.timer_args.num_threads, results[work_order].instructions)
+        print(
+            work_order.label,
+            work_order.autolabels,
+            work_order.timer_args.num_threads,
+            results[work_order].instructions,
+        )
 
 
 if __name__ == "__main__":

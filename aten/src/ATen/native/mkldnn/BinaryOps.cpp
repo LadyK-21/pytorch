@@ -1,7 +1,15 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/ExpandUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/mul_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -44,10 +52,9 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
+static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   if (!self.requires_grad() && !other.requires_grad()) {
     auto out_size = infer_size(self.sizes(), other.sizes());
     auto out_dtype = promoteTypes(
@@ -147,7 +154,6 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
   return native::mkldnn_mul_out(self, other, self);
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

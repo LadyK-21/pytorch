@@ -1,15 +1,16 @@
+# mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, Tuple, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 import torch.fx
 import torch.fx as fx
-from torch.fx import Transformer, Proxy
-from torch.fx.node import Argument, Target, Node, map_aggregate
+from torch.fx import Proxy, Transformer
+from torch.fx.node import Argument, map_aggregate, Node, Target
 from torch.fx.operator_schemas import (
-    normalize_module,
-    normalize_function,
     create_type_hint,
+    normalize_function,
+    normalize_module,
 )
 
 from .schema_type_annotation import AnnotateTypesWithSchema
@@ -34,7 +35,7 @@ class NormalizeArgs(Transformer):
     """
 
     def __init__(
-        self, module: torch.nn.Module, normalize_to_only_use_kwargs: bool = True
+        self, module: torch.fx.GraphModule, normalize_to_only_use_kwargs: bool = True
     ):
         super().__init__(module)
         self.node_map: Dict[Proxy, Node] = {}
@@ -59,6 +60,7 @@ class NormalizeArgs(Transformer):
         if n.op != "output":
             self.node_map[out] = n
             out.node.meta = n.meta
+            out.node.type = n.type
         return out
 
     def call_function(

@@ -1,6 +1,12 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/copy_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -18,8 +24,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(
@@ -37,7 +42,6 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

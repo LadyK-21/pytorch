@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# mypy: allow-untyped-defs
+
 import os
 import sys
 import unittest
@@ -14,9 +15,6 @@ from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     CudaDdpComparisonTest,
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
-)
-from torch.testing._internal.distributed.pipe_with_ddp_test import (
-    PipeWithDDPTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     CudaRemoteModuleTest,
@@ -43,9 +41,11 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
+    FaultyAgentRpcTest,
+)
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
-    FaultyAgentRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,
@@ -118,7 +118,6 @@ GENERIC_CUDA_TESTS = [
     CudaDistAutogradTest,
     CudaRemoteModuleTest,
     CudaDdpComparisonTest,
-    PipeWithDDPTest,
 ]
 
 
@@ -176,7 +175,7 @@ def generate_tests(
             continue
 
         name = f"{prefix}{test_class.__name__}"
-        class_ = type(name, (test_class, mixin, SpawnHelper), dict())
+        class_ = type(name, (test_class, mixin, SpawnHelper), {})
         class_.__module__ = module_name
         ret[name] = class_
     return ret
