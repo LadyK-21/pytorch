@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 import re
 import sys
@@ -107,14 +109,13 @@ def check_file(filename):
     Returns:
         The number of unsafe kernel launches in the file
     """
-    if not (filename.endswith(".cu") or filename.endswith(".cuh")):
+    if not (filename.endswith((".cu", ".cuh"))):
         return 0
     if should_exclude_file(filename):
         return 0
-    fo = open(filename, "r")
-    contents = fo.read()
-    unsafeCount = check_code_for_cuda_kernel_launches(contents, filename)
-    fo.close()
+    with open(filename) as fo:
+        contents = fo.read()
+        unsafeCount = check_code_for_cuda_kernel_launches(contents, filename)
     return unsafeCount
 
 
@@ -161,4 +162,4 @@ def check_cuda_kernel_launches():
 
 if __name__ == "__main__":
     unsafe_launches = check_cuda_kernel_launches()
-    sys.exit(0)
+    sys.exit(0 if unsafe_launches == 0 else 1)

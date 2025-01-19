@@ -1,11 +1,36 @@
+# mypy: allow-untyped-defs
+import copy
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 import torch.fx
-import torch.nn as nn
-from torch.fx.graph import map_arg
-from .tools_common import NodeList, NodeSet
 from torch.fx._compatibility import compatibility
+from torch.fx.graph import map_arg
+from torch.fx.passes.utils import HolderModule, lift_subgraph_as_module
+
+from .tools_common import NodeList
+
+
+__all__ = ["getattr_recursive", "setattr_recursive", "Component", "split_by_tags"]
+
+
+@compatibility(is_backward_compatible=False)
+def getattr_recursive(obj, name):
+    for layer in name.split("."):
+        if hasattr(obj, layer):
+            obj = getattr(obj, layer)
+        else:
+            return None
+    return obj
+
+
+@compatibility(is_backward_compatible=False)
+def setattr_recursive(obj, attr, value):
+    if "." not in attr:
+        setattr(obj, attr, value)
+    else:
+        layer = attr.split(".")
+        setattr_recursive(getattr(obj, layer[0]), ".".join(layer[1:]), value)
 
 
 @compatibility(is_backward_compatible=False)
@@ -35,24 +60,17 @@ class Component:
 
 
 @compatibility(is_backward_compatible=False)
-class HolderModule(nn.Module):
-    """
-    HolderModule is used to copy all the attributes from original module to submodules
-    that uses the attributes
-    """
-
-    def __init__(self, d):
-        super().__init__()
-        for k, v in d.items():
-            self.add_module(k, v)
-
-
-@compatibility(is_backward_compatible=False)
-def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphModule:
+def split_by_tags(
+    gm: torch.fx.GraphModule,
+    tags: List[str],
+    return_fqn_mapping: bool = False,
+    return_tuple: bool = False,
+    GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
+) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, Dict[str, str]]]:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
     tags. For example, we have tags = ["a", "b", "c"], the function will create
-    the initial submodules in the order of "a_0", "b_1", "c_2".
+    the initial submodules in the order of "a", "b", "c".
 
     To set a tag:
     gm.graph.nodes[idx].tag = "mytag"
@@ -65,7 +83,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     Given the following module def:
 
     class SimpleModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear1 = torch.nn.Linear(...)
             self.linear2 = torch.nn.Linear(...)
@@ -79,13 +97,13 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     Marking the node corresponding to in1 with the tag sc.REQUEST_ONLY.lower() results in the following split:
 
-    ro_0:
+    ro:
     def forward(self, in1):
         self = self.root
         linear1 = self.linear1(in1)
         return linear1
 
-    main_1:
+    main:
     def forward(self, in2, linear1):
         self = self.root
         linear2 = self.linear2(in2)
@@ -93,12 +111,17 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         linear3 = self.linear3(cat_1)
         return linear3
 
-    main_0:
+    main:
     def forward(self, in1, in2):
         self = self.root
         ro_0 = self.ro_0(in1)
         main_1 = self.main_1(in2, ro_0)
         return main_1
+
+    Returns:
+        split_gm: torch fx graph after split
+        orig_to_split_fqn_mapping: a map between the original fqn and the fqn
+            after split for call_module and get_attr.
     """
 
     def flatten(x: torch.fx.node.Argument) -> NodeList:
@@ -123,7 +146,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     all_components: List[Component] = []
 
     # Stores nodes that will be used in main graph.
-    used_in_main: NodeSet = set()
+    used_in_main: Dict[torch.fx.Node, None] = {}
 
     # Main graph after split.
     main_g = torch.fx.Graph()
@@ -151,6 +174,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # Placeholders in the original graph get copied to main graph.
         if node.op == "placeholder":
             main_remapping[node] = main_g.placeholder(node.name, type_expr=node.type)
+            main_remapping[node].meta = copy.copy(node.meta)
             continue
 
         # Get_attr nodes are ignored because we are not tagging them.
@@ -160,7 +184,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
         # Now we process callable nodes which are nodes with op of call_module,
         # call_function or call_method. Every callable nodes should be tagged.
-        assert hasattr(node, "tag")
+        assert hasattr(node, "tag"), f"Node does not have tag: {node.format_node()}"
 
         upstream_components = [
             node_to_component[x]
@@ -174,8 +198,11 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # Max order of upperstream components.
         mx = max((c.order for c in upstream_components), default=0)
 
-        # Expect the componet for `node` has higher order then its upstream components.
-        assert comp.order >= mx
+        # Expect the component for `node` has higher order then its upstream components.
+        assert (
+            comp.order >= mx
+        ), f"Expected order: {comp.order} for the component: {comp.name} to be >= {mx}, the max order for all its "
+        "upstream components."
 
         # Map a input of `node` to nodes in the component's graph.
         def remap_func(x):
@@ -198,14 +225,12 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             # as a placeholder in current component's graph.
             if x not in comp.orig_inputs:
                 comp.orig_inputs.append(x)
-                comp.input_placeholders.append(
-                    comp.graph.placeholder(x.name, type_expr=x.type)
-                )
-                used_in_main.add(x)
+                placeholder = comp.graph.placeholder(x.name, type_expr=x.type)
+                placeholder.meta = copy.copy(x.meta)
+                comp.input_placeholders.append(placeholder)
+                used_in_main[x] = None
 
-            return comp.input_placeholders[
-                next(i for i, y in enumerate(comp.orig_inputs) if x is y)
-            ]
+            return comp.input_placeholders[comp.orig_inputs.index(x)]
 
         n = comp.graph.node_copy(node, remap_func)
         n.tag = node.tag  # type: ignore[attr-defined]
@@ -224,7 +249,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         else:
             # All component results consumed by the output node should be
             # marked as "used in main".
-            used_in_main.add(x)
+            used_in_main[x] = None
 
     # If a node is used in main graph then we mark it as an output in the component
     # it belongs to.
@@ -233,46 +258,23 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             node_to_component[n].orig_outputs.append(n)
 
     # Now we create a graphmodule for each component.
+    orig_to_split_fqn_mapping: Dict[str, str] = {}
     for comp in all_components:
         outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
 
-        # Take care of the args of FX output node. If there's a single
-        # output then the output node args is like (output_single), else
-        # if there're multiple outputs then the output node args is like
-        # ((output_0, output_1, ...)).
-        comp.graph.output(outs[0] if len(outs) == 1 else outs)
+        if return_tuple:
+            comp.graph.output(outs)
+        else:
+            # Take care of the args of FX output node. If there's a single
+            # output then the output node args is like (output_single), else
+            # if there're multiple outputs then the output node args is like
+            # ((output_0, output_1, ...)).
+            comp.graph.output(outs[0] if len(outs) == 1 else outs)
 
-        # Loop through all module calls (call_module) and param fetches (get_attr)
-        # in this component, creating HolderModules as necessary to match the path.
-        # e.g. if in the original module there's a get_attr node fetches "conv.weight".
-        # We create a HolderModule as root -> add a HolderModule named "conv" ->
-        # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
-        # the original module.
-        root = HolderModule({})
-        for n in comp.graph.nodes:
-            if n.op not in ("call_module", "get_attr"):
-                continue
-
-            target = n.target
-            assert isinstance(target, str)
-            target_name_parts = target.split(".")
-            curr = root
-            orig_gm = gm
-
-            for name in target_name_parts[:-1]:
-                if not hasattr(curr, name):
-                    curr.add_module(name, HolderModule({}))
-
-                curr = getattr(curr, name)
-                orig_gm = getattr(orig_gm, name)
-
-            leaf_node_name = target_name_parts[-1]
-            leaf_node = getattr(orig_gm, leaf_node_name)
-
-            # Relies on custom __setattr__ magic.
-            setattr(curr, leaf_node_name, leaf_node)
-
-        comp.gm = torch.fx.GraphModule(root, comp.graph)
+        comp.gm, comp_orig_to_split_fqn_mapping = lift_subgraph_as_module(
+            gm, subgraph=comp.graph, comp_name=comp.name
+        )
+        orig_to_split_fqn_mapping.update(comp_orig_to_split_fqn_mapping)
 
         # Create a call_module node in main graph.
         main_node = main_g.call_module(
@@ -281,7 +283,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             kwargs=None,
         )
 
-        if len(outs) == 1:
+        if len(outs) == 1 and not return_tuple:
             main_remapping[comp.orig_outputs[0]] = main_node
         else:
             for i, o in enumerate(comp.orig_outputs):
@@ -290,11 +292,16 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     main_g.output(map_arg(output_node.args[0], main_remapping.__getitem__))
     main_root = HolderModule({comp.name: comp.gm for comp in all_components})
+    main_g._codegen = gm.graph._codegen
 
     # If the output nodes consumes get_attr directly in the original graph,
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
         if x.op == "get_attr":
-            setattr(main_root, x.name, getattr(gm, x.target))  # type: ignore[arg-type]
+            setattr(main_root, x.name, getattr_recursive(gm, x.target))  # type: ignore[arg-type]
 
-    return torch.fx.GraphModule(main_root, main_g)
+    result_gm = GraphModuleCls(main_root, main_g)
+    if return_fqn_mapping:
+        return result_gm, orig_to_split_fqn_mapping
+
+    return result_gm
