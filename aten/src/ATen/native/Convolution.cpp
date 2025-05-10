@@ -607,7 +607,7 @@ struct ConvParams {
   // nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
   // a depthwise multiplier)
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
-    return (input.is_cuda() || input.is_xpu()) &&
+    return input.is_cuda() &&
            !transposed &&
            (input.ndimension() == 4 || input.ndimension() == 5) &&
            at::symint::size<T>(input, 1) == groups &&
@@ -1187,7 +1187,7 @@ at::Tensor convolution(
   bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN("conv"));
 }
 
 at::Tensor convolution_overrideable(
@@ -1223,12 +1223,6 @@ static ConvBackend _select_conv_backend(
       return ConvBackend::Cudnn;
     } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
       return ConvBackend::MiopenDepthwise;
-    } else if (params.use_mkldnn(input, weight)) {
-      if (params.transposed) {
-        return ConvBackend::MkldnnTranspose;
-      } else {
-        return ConvBackend::Mkldnn;
-      }
     } else {
       if (input.ndimension() == 4) {
         return ConvBackend::CudaDepthwise2d;
@@ -1338,7 +1332,7 @@ ConvBackend select_conv_backend(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   auto input = input_r;
   auto weight = weight_r;
@@ -1725,7 +1719,7 @@ at::Tensor _convolution(
   c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
+  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN("conv"));
 }
 
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
@@ -2023,7 +2017,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);

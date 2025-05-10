@@ -133,6 +133,44 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
+After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "ieee"
+  torch.backends.cuda.matmul.fp32_precision = "ieee"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
+`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overrided to `ieee`.
+
+Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
+to use mix of old and new settings.
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_
@@ -768,6 +806,21 @@ be called internally on deletion of the pool, hence returning all the memory to 
 .. code:: python
 
    del tensor, del pool
+
+
+Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
+creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
+a last resort instead of OOMing.
+
+.. code:: python
+
+    pool = torch.cuda.MemPool(allocator, use_on_oom=True)
+    with torch.cuda.use_mem_pool(pool):
+        a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del a
+
+    # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
+    b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
 
 
 The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
